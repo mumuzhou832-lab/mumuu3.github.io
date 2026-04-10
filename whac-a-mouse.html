@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Whac-A-Mouse 🐭</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #2d5a1b;         /* deep grass green outside the game area */
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 100vh;
+      padding: 20px 16px 40px;
+      user-select: none;
+    }
+
+    /* ── HUD (score bar) ── */
+    #hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 760px;
+      background: rgba(0,0,0,.35);
+      backdrop-filter: blur(4px);
+      border-radius: 14px;
+      padding: 12px 28px;
+      margin-bottom: 18px;
+      color: #fff;
+    }
+
+    #hud h1 { font-size: 1.35rem; letter-spacing: .04em; }
+
+    #score-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    #score-box span { font-size: 2rem; }
+
+    #timer-box {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #f9e04b;
+    }
+
+    /* ── Game Area ── */
+    #game-area {
+      position: relative;
+      width: 100%;
+      max-width: 760px;
+      /* height set by JS so it's always square-ish and responsive */
+      background:
+        radial-gradient(ellipse at 50% 100%, #3a7d22 0%, #2a5e14 60%, #1e4a0e 100%);
+      border-radius: 18px;
+      border: 4px solid #1a3d09;
+      overflow: hidden;
+      /* Custom hammer cursor inside game area */
+      cursor: none;
+    }
+
+    /* Grid lines (decorative) */
+    #game-area::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background-image:
+        repeating-linear-gradient(0deg,   transparent, transparent 32%, rgba(0,0,0,.07) 33%),
+        repeating-linear-gradient(90deg,  transparent, transparent 32%, rgba(0,0,0,.07) 33%);
+      pointer-events: none;
+    }
+
+    /* Hole spots – each cell gets a "hole" background via pseudo-element */
+    .hole {
+      position: absolute;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      /* size/position set by JS */
+    }
+
+    .hole::before {
+      content: '';
+      position: absolute;
+      width: 72%;
+      height: 38%;
+      bottom: 4%;
+      left: 14%;
+      background: radial-gradient(ellipse, #1a3a08 30%, #0d2204 100%);
+      border-radius: 50%;
+      box-shadow: 0 4px 14px rgba(0,0,0,.55);
+    }
+
+    /* ── Mouse Avatar ── */
+    .mouse {
+      position: absolute;
+      font-size: 3rem;           /* emoji size */
+      line-height: 1;
+      cursor: none;
+      z-index: 10;
+      transform: scale(0);       /* start hidden (scale 0) */
+      transition: transform .15s cubic-bezier(.34,1.56,.64,1); /* springy pop */
+      pointer-events: none;      /* turned on when shown */
+    }
+
+    .mouse.visible {
+      transform: scale(1);
+      pointer-events: auto;
+    }
+
+    /* "Hit" burst animation */
+    .mouse.hit {
+      transform: scale(0) rotate(30deg) !important;
+      transition: transform .18s ease-in !important;
+      pointer-events: none;
+    }
+
+    /* ── Hammer Cursor ── */
+    #hammer-cursor {
+      position: fixed;
+      pointer-events: none;
+      font-size: 2.2rem;
+      line-height: 1;
+      z-index: 9999;
+      transform: translate(-30%, -80%) rotate(-30deg); /* offset so tip is at pointer */
+      transition: transform .06s ease;
+      display: none;  /* shown only when mouse is inside #game-area */
+    }
+
+    #hammer-cursor.whack {
+      transform: translate(-30%, -50%) rotate(20deg);
+    }
+
+    /* ── Overlay screens ── */
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,.62);
+      border-radius: 14px;
+      z-index: 100;
+      gap: 18px;
+      text-align: center;
+      padding: 24px;
+    }
+
+    .overlay h2 { font-size: 2.2rem; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6); }
+    .overlay p  { font-size: 1.1rem; color: #c8f5a0; max-width: 340px; line-height: 1.5; }
+
+    .btn {
+      padding: 14px 42px;
+      font-size: 1.2rem;
+      font-weight: 700;
+      border: none;
+      border-radius: 50px;
+      cursor: pointer;
+      background: linear-gradient(135deg, #7ed957 0%, #4caf28 100%);
+      color: #1a4a00;
+      box-shadow: 0 4px 14px rgba(0,0,0,.3);
+      transition: transform .1s, box-shadow .1s;
+    }
+
+    .btn:hover  { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.35); }
+    .btn:active { transform: translateY(0);    box-shadow: 0 2px 8px rgba(0,0,0,.3);  }
+
+    /* ── Score popup on hit ── */
+    .score-popup {
+      position: absolute;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: #f9e04b;
+      text-shadow: 0 1px 6px rgba(0,0,0,.7);
+      pointer-events: none;
+      z-index: 50;
+      animation: floatUp .7s ease forwards;
+    }
+
+    @keyframes floatUp {
+      0%   { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-60px) scale(1.3); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Hammer cursor (follows real mouse pointer) -->
+<div id="hammer-cursor">🔨</div>
+
+<!-- HUD -->
+<div id="hud">
+  <h1>🐭 Whac-A-Mouse</h1>
+  <div id="score-box"><span>⭐</span> Score: <strong id="score-display">0</strong></div>
+  <div id="timer-box">⏱ <span id="timer-display">30</span>s</div>
+</div>
+
+<!-- Game Area -->
+<div id="game-area">
+  <!-- Start overlay -->
+  <div class="overlay" id="start-overlay">
+    <h2>🐭 Whac-A-Mouse!</h2>
+    <p>Mice will pop up from holes in the grass. Hit as many as you can in 30 seconds!</p>
+    <button class="btn" id="start-btn">▶ Start Game</button>
+  </div>
+
+  <!-- Game-over overlay (hidden at start) -->
+  <div class="overlay" id="gameover-overlay" style="display:none;">
+    <h2>🎉 Time's Up!</h2>
+    <p id="final-score-msg">You scored <strong>0</strong> points!</p>
+    <button class="btn" id="restart-btn">🔄 Play Again</button>
+  </div>
+</div>
+
+<script>
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CONFIGURATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const CONFIG = {
+  GRID_COLS: 3,          // columns in the hole grid
+  GRID_ROWS: 3,          // rows in the hole grid
+  MOUSE_VISIBLE_MS: 2000, // how long a mouse stays if not hit (ms)
+  SPAWN_MIN_MS: 2800,    // minimum interval between spawns (ms)
+  SPAWN_MAX_MS: 4200,    // maximum interval between spawns (ms)
+  GAME_DURATION_SEC: 30, // total game time
+};
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// STATE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+let score = 0;
+let timeLeft = CONFIG.GAME_DURATION_SEC;
+let gameRunning = false;
+
+let spawnTimer = null;   // setTimeout handle for next spawn
+let countdownTimer = null; // setInterval handle for HUD countdown
+let hideMiceTimers = {};   // map of holeIndex → setTimeout for auto-hide
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// DOM REFERENCES
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const gameArea       = document.getElementById('game-area');
+const scoreDisplay   = document.getElementById('score-display');
+const timerDisplay   = document.getElementById('timer-display');
+const startOverlay   = document.getElementById('start-overlay');
+const gameoverOverlay= document.getElementById('gameover-overlay');
+const finalScoreMsg  = document.getElementById('final-score-msg');
+const hammerCursor   = document.getElementById('hammer-cursor');
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GRID SETUP
+// Computes hole positions and builds DOM elements
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/** Array of { holeEl, mouseEl } for each cell */
+let cells = [];
+
+function buildGrid() {
+  // Remove previously built cells (for restart)
+  gameArea.querySelectorAll('.hole').forEach(el => el.remove());
+  cells = [];
+
+  const totalCells = CONFIG.GRID_COLS * CONFIG.GRID_ROWS;
+
+  for (let i = 0; i < totalCells; i++) {
+    const row = Math.floor(i / CONFIG.GRID_COLS);
+    const col = i % CONFIG.GRID_COLS;
+
+    // -- Hole container --
+    const hole = document.createElement('div');
+    hole.className = 'hole';
+
+    // percentage-based positioning for responsiveness
+    const colW = 100 / CONFIG.GRID_COLS;
+    const rowH = 100 / CONFIG.GRID_ROWS;
+    hole.style.cssText = `
+      left:   ${col * colW}%;
+      top:    ${row * rowH}%;
+      width:  ${colW}%;
+      height: ${rowH}%;
+    `;
+
+    // -- Mouse avatar inside hole --
+    const mouse = document.createElement('div');
+    mouse.className = 'mouse';
+    mouse.textContent = '🐭';
+    mouse.dataset.index = i;
+
+    // Hit handler (attached once, active only when mouse is .visible)
+    mouse.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!gameRunning) return;
+      registerHit(i, e.clientX, e.clientY);
+    });
+
+    hole.appendChild(mouse);
+    gameArea.appendChild(hole);
+
+    cells.push({ hole, mouse });
+  }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// SPAWN LOGIC
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/** Returns a random integer between min and max (inclusive) */
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+/** Show a mouse in a random empty hole */
+function spawnMouse() {
+  if (!gameRunning) return;
+
+  // Collect holes that currently have no visible mouse
+  const emptyIndices = cells
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => !c.mouse.classList.contains('visible'))
+    .map(({ i }) => i);
+
+  if (emptyIndices.length === 0) {
+    scheduleNextSpawn(); // all holes occupied; try again after normal delay
+    return;
+  }
+
+  // Pick a random empty hole
+  const idx = emptyIndices[randInt(0, emptyIndices.length - 1)];
+  showMouse(idx);
+  scheduleNextSpawn();
+}
+
+/** Make the mouse at index `idx` visible */
+function showMouse(idx) {
+  const { mouse } = cells[idx];
+  mouse.classList.add('visible');
+
+  // Auto-hide after CONFIG.MOUSE_VISIBLE_MS if not hit
+  hideMiceTimers[idx] = setTimeout(() => hideMouse(idx), CONFIG.MOUSE_VISIBLE_MS);
+}
+
+/** Hide the mouse at index `idx` (no hit) */
+function hideMouse(idx) {
+  const { mouse } = cells[idx];
+  mouse.classList.remove('visible');
+  clearTimeout(hideMiceTimers[idx]);
+  delete hideMiceTimers[idx];
+}
+
+/** Schedule the next spawn after a random delay */
+function scheduleNextSpawn() {
+  if (!gameRunning) return;
+  const delay = randInt(CONFIG.SPAWN_MIN_MS, CONFIG.SPAWN_MAX_MS);
+  spawnTimer = setTimeout(spawnMouse, delay);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// HIT REGISTRATION
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function registerHit(idx, clientX, clientY) {
+  // Cancel auto-hide timer
+  clearTimeout(hideMiceTimers[idx]);
+  delete hideMiceTimers[idx];
+
+  const { mouse } = cells[idx];
+
+  // Play hit animation, then clean up
+  mouse.classList.add('hit');
+  setTimeout(() => {
+    mouse.classList.remove('visible', 'hit');
+  }, 200);
+
+  // Update score
+  score++;
+  scoreDisplay.textContent = score;
+
+  // Show floating "+1" popup near click position
+  showScorePopup(clientX, clientY);
+
+  // Animate the hammer "whack"
+  triggerHammerWhack();
+}
+
+/** Spawn a floating "+1" label at the clicked position */
+function showScorePopup(clientX, clientY) {
+  const rect = gameArea.getBoundingClientRect();
+  const popup = document.createElement('div');
+  popup.className = 'score-popup';
+  popup.textContent = '+1';
+  popup.style.left = (clientX - rect.left) + 'px';
+  popup.style.top  = (clientY - rect.top)  + 'px';
+  gameArea.appendChild(popup);
+  // Remove after animation ends
+  popup.addEventListener('animationend', () => popup.remove());
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CUSTOM CURSOR (HAMMER)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+let hammerWhackTimeout = null;
+
+/** Move the hammer emoji to follow the real cursor */
+function onMouseMove(e) {
+  hammerCursor.style.left = e.clientX + 'px';
+  hammerCursor.style.top  = e.clientY + 'px';
+}
+
+/** Tilt the hammer on click ("whack" animation) */
+function triggerHammerWhack() {
+  hammerCursor.classList.add('whack');
+  clearTimeout(hammerWhackTimeout);
+  hammerWhackTimeout = setTimeout(() => hammerCursor.classList.remove('whack'), 180);
+}
+
+// Show/hide hammer when cursor enters/leaves the game area
+gameArea.addEventListener('mouseenter', () => {
+  if (!gameRunning) return;
+  hammerCursor.style.display = 'block';
+});
+gameArea.addEventListener('mouseleave', () => {
+  hammerCursor.style.display = 'none';
+});
+
+// Also trigger whack animation on any click inside game area (miss feedback)
+gameArea.addEventListener('click', (e) => {
+  if (!gameRunning) return;
+  triggerHammerWhack();
+});
+
+document.addEventListener('mousemove', onMouseMove);
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// COUNTDOWN TIMER
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function startCountdown() {
+  timeLeft = CONFIG.GAME_DURATION_SEC;
+  timerDisplay.textContent = timeLeft;
+
+  countdownTimer = setInterval(() => {
+    timeLeft--;
+    timerDisplay.textContent = timeLeft;
+    if (timeLeft <= 0) endGame();
+  }, 1000);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GAME LIFECYCLE
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function startGame() {
+  // Reset state
+  score = 0;
+  scoreDisplay.textContent = 0;
+  gameRunning = true;
+
+  // Hide overlays
+  startOverlay.style.display   = 'none';
+  gameoverOverlay.style.display = 'none';
+
+  // Build / rebuild grid
+  buildGrid();
+
+  // Kick off timers
+  startCountdown();
+  scheduleNextSpawn(); // first spawn after random delay
+}
+
+function endGame() {
+  gameRunning = false;
+
+  // Stop all timers
+  clearInterval(countdownTimer);
+  clearTimeout(spawnTimer);
+
+  // Cancel all pending auto-hide timers
+  Object.values(hideMiceTimers).forEach(t => clearTimeout(t));
+  hideMiceTimers = {};
+
+  // Hide all visible mice
+  cells.forEach(({ mouse }) => {
+    mouse.classList.remove('visible', 'hit');
+  });
+
+  // Show result
+  finalScoreMsg.innerHTML = `You caught <strong>${score}</strong> mouse${score !== 1 ? 'es' : ''}! 🧀`;
+  gameoverOverlay.style.display = 'flex';
+  hammerCursor.style.display = 'none';
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RESPONSIVE HEIGHT
+// Keeps the game area at a comfortable aspect ratio
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function resizeGameArea() {
+  const w = gameArea.offsetWidth;
+  // Keep roughly 1:1 aspect ratio, capped to viewport height with some margin
+  const maxH = window.innerHeight - 200;
+  gameArea.style.height = Math.min(w, maxH) + 'px';
+}
+
+window.addEventListener('resize', resizeGameArea);
+resizeGameArea(); // initial sizing
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BUTTON BINDINGS
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('restart-btn').addEventListener('click', startGame);
+</script>
+</body>
+</html>
